@@ -20,9 +20,9 @@ See `docs/HOWTO.rst`_.
 There is also an `installer`_ available that simplifies the installation on various Linux-based distributions.
 There is also an `Dockerfile`_ available .
 
-.. _installer: https://github.com/bauerj/electrumx-installer
+.. _installer:  https://github.com/ZclassicDev/electrumx-installer
 
-.. _Dockerfile: https://github.com/lukechilds/docker-electrumx
+.. _Dockerfile: https://github.com/ZclassicDev/docker-electrumx
 
 Features
 ========
