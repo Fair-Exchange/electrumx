@@ -10,7 +10,7 @@ RUN apt-get install -y libleveldb1 libleveldb-dev
 RUN apt-get install -y build-essential pkg-config libc6-dev m4 g++-multilib autoconf libtool ncurses-dev unzip git python zlib1g-dev wget bsdmainutils automake
 
 # Build zcl node daemon
-RUN git clone https://github.com/z-classic/zclassic
+RUN git clone --recursive https://github.com/ZclassicDev/zclassic.git
 RUN mkdir /home/zcluser/zcl_electrum_db
 RUN /home/zcluser/zclassic/zcutil/build.sh -j$(nproc)
 
@@ -26,8 +26,8 @@ RUN chmod 755 /home/zcluser/run_electrumx_docker.sh
 
 USER zcluser
 RUN /home/zcluser/zclassic/zcutil/fetch-params.sh
-RUN git clone https://github.com/BTCP-community/electrumx.git
-RUN wget -q https://github.com/z-classic/zclassic/releases/download/Config/zclassic.conf
+RUN git clone --recursive https://github.com/ZclassicDev/electrumx.git
+RUN wget -q https://github.com/ZclassicDev/zclassic/releases/download/Config/zclassic.conf
 RUN sed -ie '/^rpcport=8232/a txindex=1' zclassic.conf
 
 ENTRYPOINT ["/bin/sh", "-c", "/home/zcluser/run_electrumx_docker.sh"]
