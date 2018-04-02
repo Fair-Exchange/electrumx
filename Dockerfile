@@ -28,6 +28,8 @@ USER zcluser
 RUN /home/zcluser/zclassic/zcutil/fetch-params.sh
 RUN git clone --recursive https://github.com/ZclassicDev/electrumx.git
 RUN wget -q https://github.com/ZclassicDev/zclassic/releases/download/Config/zclassic.conf
-RUN sed -ie '/^rpcport=8232/a txindex=1' zclassic.conf
+RUN sed -ie '/^rpcport=8232/a txindex=1' zclassic.conf	### OLD rpcport?
+RUN sed -ie '/^rpcport=8032/a txindex=1' zclassic.conf
+RUN sed -ie '/^rpcallowip=127.0.0.1/a txindex=1' zclassic.conf
 
 ENTRYPOINT ["/bin/sh", "-c", "/home/zcluser/run_electrumx_docker.sh"]

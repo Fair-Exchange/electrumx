@@ -25,6 +25,8 @@ class SessionBase(JSONSession):
     sessions.
     '''
 
+    MAX_CHUNK_SIZE = 2016
+
     def __init__(self, controller, kind):
         # Force v2 as a temporary hack for old Coinomi wallets
         # Remove in April 2017
@@ -106,13 +108,13 @@ class ElectrumX(SessionBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.subscribe_headers = False
+        self.subscribe_headers_raw = False
         self.subscribe_height = False
         self.notified_height = None
         self.max_send = self.env.max_send
         self.max_subs = self.env.max_session_subs
         self.hashX_subs = {}
         self.mempool_statuses = {}
-        self.chunk_indices = []
         self.protocol_version = None
         self.set_protocol_handlers((1, 0))
 
@@ -163,7 +165,7 @@ class ElectrumX(SessionBase):
         if height_changed:
             self.notified_height = height
             if self.subscribe_headers:
-                args = (self.controller.electrum_header(height), )
+                args = (self.subscribe_headers_result(height), )
                 self.send_notification('blockchain.headers.subscribe', args)
             if self.subscribe_height:
                 args = (height, )
@@ -179,12 +181,25 @@ class ElectrumX(SessionBase):
         '''Return the current flushed database height.'''
         return self.bp.db_height
 
-    def headers_subscribe(self):
+    def assert_boolean(self, value):
+        '''Return param value it is boolean otherwise raise an RPCError.'''
+        if value in (False, True):
+            return value
+        raise RPCError('{} should be a boolean value'.format(value))
+
+    def subscribe_headers_result(self, height):
+        '''The result of a header subscription for the given height.'''
+        if self.subscribe_headers_raw:
+            raw_header = self.controller.raw_header(height)
+            return {'hex': raw_header.hex(), 'height': height}
+        return self.controller.electrum_header(height)
+
+    def headers_subscribe(self, raw=False):
         '''Subscribe to get headers of new blocks.'''
         self.subscribe_headers = True
-        height = self.height()
-        self.notified_height = height
-        return self.controller.electrum_header(height)
+        self.subscribe_headers_raw = self.assert_boolean(raw)
+        self.notified_height = self.height()
+        return self.subscribe_headers_result(self.height())
 
     def numblocks_subscribe(self):
         '''Subscribe to get height of new blocks.'''
@@ -255,28 +270,37 @@ class ElectrumX(SessionBase):
         '''Returns a dictionary of server features.'''
         return self.env.server_features()
 
+    def block_headers(self, start_height, count):
+        '''Return count concatenated block headers as hex for the main chain;
+        starting at start_height.
+
+        start_height and count must be non-negative integers.  At most
+        MAX_CHUNK_SIZE headers will be returned.
+        '''
+        start_height = self.controller.non_negative_integer(start_height)
+        count = self.controller.non_negative_integer(count)
+        count = min(count, self.MAX_CHUNK_SIZE)
+        hex_str, n =  self.controller.block_headers(start_height, count)
+        return {'hex': hex_str, 'count': n, 'max': self.MAX_CHUNK_SIZE}
+
     def block_get_chunk(self, index):
         '''Return a chunk of block headers as a hexadecimal string.
 
         index: the chunk index'''
         index = self.controller.non_negative_integer(index)
-        if self.client_version < (2, 8, 3):
-            self.chunk_indices.append(index)
-            self.chunk_indices = self.chunk_indices[-5:]
-            # -2 allows backing up a single chunk but no more.
-            if index <= max(self.chunk_indices[:-2], default=-1):
-                msg = ('chunk indices not advancing (wrong network?): {}'
-                       .format(self.chunk_indices))
-                # use INVALID_REQUEST to trigger a disconnect
-                raise RPCError(msg, JSONRPC.INVALID_REQUEST)
-        return self.controller.get_chunk(index)
+        chunk_size = self.controller.coin.CHUNK_SIZE
+        start_height = index * chunk_size
+        hex_str, n =  self.controller.block_headers(start_height, chunk_size)
+        return hex_str
 
     def is_tor(self):
         '''Try to detect if the connection is to a tor hidden service we are
         running.'''
-        proxy = self.controller.peer_mgr.proxy
+        peername = self.controller.peer_mgr.proxy_peername()
+        if not peername:
+            return False
         peer_info = self.peer_info()
-        return peer_info and peer_info[0] == proxy.ip_addr
+        return peer_info and peer_info[0] == peername[0]
 
     async def replaced_banner(self, banner):
         network_info = await self.controller.daemon_request('getnetworkinfo')
@@ -320,6 +344,12 @@ class ElectrumX(SessionBase):
                 banner = await self.replaced_banner(banner)
 
         return banner
+
+    def ping(self):
+        '''Serves as a connection keep-alive mechanism and for the client to
+        confirm the server is still responding.
+        '''
+        return None
 
     def server_version(self, client_name=None, protocol_version=None):
         '''Returns the server version as a string.
@@ -447,6 +477,15 @@ class ElectrumX(SessionBase):
                 'blockchain.scripthash.subscribe': self.scripthash_subscribe,
                 'blockchain.transaction.broadcast': self.transaction_broadcast,
                 'blockchain.transaction.get': controller.transaction_get,
+            })
+
+        if ptuple >= (1, 2):
+            # New handler as of 1.2
+            handlers.update({
+                'mempool.get_fee_histogram':
+                controller.mempool_get_fee_histogram,
+                'blockchain.block.headers': self.block_headers,
+                'server.ping': self.ping,
             })
 
         self.electrumx_handlers = handlers

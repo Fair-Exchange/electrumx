@@ -297,16 +297,20 @@ class Controller(ServerBase):
         for session in self.sessions:
             session.notify_peers(updates)
 
-    def electrum_header(self, height):
+    def raw_header(self, height):
         '''Return the binary header at the given height.'''
-        if not 0 <= height <= self.bp.db_height:
+        header, n = self.bp.read_headers(height, 1)
+        if n != 1:
             raise RPCError('height {:,d} out of range'.format(height))
-        if height in self.header_cache:
-            return self.header_cache[height]
-        header = self.bp.read_headers(height, 1)
-        header = self.coin.electrum_header(header, height)
-        self.header_cache[height] = header
         return header
+
+    def electrum_header(self, height):
+        '''Return the deserialized header at the given height.'''
+        if height not in self.header_cache:
+            raw_header = self.raw_header(height)
+            self.header_cache[height] = self.coin.electrum_header(raw_header,
+                                                                  height)
+        return self.header_cache[height]
 
     def session_delay(self, session):
         priority = self.session_priority(session)
@@ -747,13 +751,16 @@ class Controller(ServerBase):
 
         return await self.run_in_executor(job)
 
-    def get_chunk(self, index):
-        '''Return header chunk as hex.  Index is a non-negative integer.'''
-        chunk_size = self.coin.CHUNK_SIZE
-        next_height = self.bp.db_height + 1
-        start_height = min(index * chunk_size, next_height)
-        count = min(next_height - start_height, chunk_size)
-        return self.bp.read_headers(start_height, count).hex()
+    def block_headers(self, start_height, count):
+        '''Read count block headers starting at start_height; both
+        must be non-negative.
+
+        The return value is (hex, n), where hex is the hex encoding of
+        the concatenated headers, and n is the number of headers read
+        (0 <= n <= count).
+        '''
+        headers, n = self.bp.read_headers(start_height, count)
+        return headers.hex(), n
 
     # Client RPC "blockchain" command handlers
 
@@ -788,15 +795,16 @@ class Controller(ServerBase):
         return await self.unconfirmed_history(hashX)
 
     async def hashX_listunspent(self, hashX):
-        '''Return the list of UTXOs of a script hash.
-
-        We should remove mempool spends from the in-DB UTXOs.'''
+        '''Return the list of UTXOs of a script hash, including mempool
+        effects.'''
         utxos = await self.get_utxos(hashX)
-        spends = await self.mempool.spends(hashX)
+        utxos = sorted(utxos)
+        utxos.extend(self.mempool.get_utxos(hashX))
+        spends = await self.mempool.potential_spends(hashX)
 
         return [{'tx_hash': hash_to_str(utxo.tx_hash), 'tx_pos': utxo.tx_pos,
                  'height': utxo.height, 'value': utxo.value}
-                for utxo in sorted(utxos)
+                for utxo in utxos
                 if (utxo.tx_hash, utxo.tx_pos) not in spends]
 
     async def address_listunspent(self, address):
@@ -825,18 +833,27 @@ class Controller(ServerBase):
         number = self.non_negative_integer(number)
         return await self.daemon_request('estimatefee', [number])
 
+    def mempool_get_fee_histogram(self):
+        '''Memory pool fee histogram.
+
+        TODO: The server should detect and discount transactions that
+        never get mined when they should.
+        '''
+        return self.mempool.get_fee_histogram()
+
     async def relayfee(self):
         '''The minimum fee a low-priority tx must pay in order to be accepted
         to the daemon's memory pool.'''
         return await self.daemon_request('relayfee')
 
-    async def transaction_get(self, tx_hash):
+    async def transaction_get(self, tx_hash, verbose=False):
         '''Return the serialized raw transaction given its hash
 
         tx_hash: the transaction hash as a hexadecimal string
+        verbose: passed on to the daemon
         '''
         self.assert_tx_hash(tx_hash)
-        return await self.daemon_request('getrawtransaction', tx_hash)
+        return await self.daemon_request('getrawtransaction', tx_hash, verbose)
 
     async def transaction_get_1_0(self, tx_hash, height=None):
         '''Return the serialized raw transaction given its hash
