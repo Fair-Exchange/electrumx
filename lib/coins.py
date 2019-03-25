@@ -673,6 +673,25 @@ class LitecoinTestnet(Litecoin):
     ]
 
 
+class Safecoin(EquihashMixin, Coin):
+        NAME = "Safecoin"
+        SHORTNAME = "SAFE"
+        NET = "mainnet"
+        XPUB_VERBYTES = bytes.fromhex("0488B21F")
+        XPRV_VERBYTES = bytes.fromhex("0488ADE5")
+        P2PKH_VERBYTE = bytes.fromhex("3D")
+        P2SH_VERBYTES = [bytes.fromhex("56")]
+        WIF_BYTE = bytes.fromhex("BD")
+        GENESIS_HASH = ('09f5deffb9c816d82b8f696befa84681'
+                        '509274288c4529f213aeeac57999e8c9')
+        DESERIALIZER = lib_tx.DeserializerZcash
+        TX_COUNT = 17755
+        TX_COUNT_HEIGHT = 178594
+        TX_PER_BLOCK = 2
+        RPC_PORT = 8771
+        REORG_LIMIT = 800
+        PEERS = []
+    
 class Viacoin(AuxPowMixin, Coin):
     NAME="Viacoin"
     SHORTNAME = "VIA"
